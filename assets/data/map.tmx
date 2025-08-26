@@ -4,7 +4,7 @@
   <image source="../graphics/Tileset.png" width="288" height="288"/>
  </tileset>
  <objectgroup id="3" name="Entities">
-  <object id="1" name="Player" x="81" y="742">
+  <object id="1" name="Player" x="48" y="752">
    <point/>
   </object>
  </objectgroup>
