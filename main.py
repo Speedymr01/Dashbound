@@ -24,58 +24,77 @@ from settings import *
 class Player(pygame.sprite.Sprite):
     def __init__(self, pos, groups, collision_sprites):
         super().__init__(groups)
-        self.image = pygame.Surface((32, 32))
-        self.image.fill((255, 0, 0))
+        self.image = pygame.image.load('./assets/graphics/player.png').convert_alpha()
+        self.image = pygame.transform.scale(self.image, (32, 32))  # Ensure it's 32x32
         self.rect = self.image.get_rect(center=pos)
         self.collision_sprites = collision_sprites
-        self.slowmo_direction = vector(0, 0)  # Direction for slowmo movement
 
-    def slide_in_direction(self, direction):
-        dx, dy = int(direction.x), int(direction.y)
-        while True:
-            next_rect = self.rect.move(dx, dy)
-            if next_rect.left < 0 or next_rect.right > 960 or next_rect.top < 0 or next_rect.bottom > 960:
-                break
-            collision = False
-            for sprite in self.collision_sprites:
-                if next_rect.colliderect(sprite.rect):
-                    collision = True
-                    break
-            if collision:
-                break
-            self.rect = next_rect
+        # Movement state
+        self.velocity = vector(0, 0)
+        self.max_velocity = 1200  # px/s
+        self.charge_rate = 1800   # px/s^2
+        self.friction = 3000      # px/s^2
+
+        # Charging state (for next move)
+        self.charging = False
+        self.charge_direction = vector(0, 0)
+        self.charge_time = 0
+        self.charge_ready = False
 
     def handle_keydown(self, key, keys):
-        # If space is held, set slowmo direction
-        if keys[KEY_ABILITY]:
+        # If not already charging, start charging in the direction of the key
+        if not self.charging and (
+            self.velocity.length_squared() > 0 or self.velocity.length_squared() == 0
+        ):
             if key in KEY_UP:
-                self.slowmo_direction = vector(0, -1)
+                self.charging = True
+                self.charge_direction = vector(0, -1)
+                self.charge_time = 0
+                self.charge_ready = False
             elif key in KEY_DOWN:
-                self.slowmo_direction = vector(0, 1)
+                self.charging = True
+                self.charge_direction = vector(0, 1)
+                self.charge_time = 0
+                self.charge_ready = False
             elif key in KEY_LEFT:
-                self.slowmo_direction = vector(-1, 0)
+                self.charging = True
+                self.charge_direction = vector(-1, 0)
+                self.charge_time = 0
+                self.charge_ready = False
             elif key in KEY_RIGHT:
-                self.slowmo_direction = vector(1, 0)
-        else:
-            # Instant slide if not holding space
-            if key in KEY_UP:
-                self.slide_in_direction(vector(0, -1))
-            elif key in KEY_DOWN:
-                self.slide_in_direction(vector(0, 1))
-            elif key in KEY_LEFT:
-                self.slide_in_direction(vector(-1, 0))
-            elif key in KEY_RIGHT:
-                self.slide_in_direction(vector(1, 0))
+                self.charging = True
+                self.charge_direction = vector(1, 0)
+                self.charge_time = 0
+                self.charge_ready = False
 
     def handle_keyup(self, key, keys):
-        # If a direction key or space is released, stop slowmo
-        if key == KEY_ABILITY or key in KEY_UP + KEY_DOWN + KEY_LEFT + KEY_RIGHT:
-            self.slowmo_direction = vector(0, 0)
+        # Only finish charging if the released key matches the charge direction
+        if self.charging:
+            if (key in KEY_UP and self.charge_direction == vector(0, -1)) or \
+               (key in KEY_DOWN and self.charge_direction == vector(0, 1)) or \
+               (key in KEY_LEFT and self.charge_direction == vector(-1, 0)) or \
+               (key in KEY_RIGHT and self.charge_direction == vector(1, 0)):
+                # If still moving, mark charge as ready for after movement
+                if self.velocity.length_squared() > 0:
+                    self.charge_ready = True
+                else:
+                    # If not moving, launch immediately
+                    speed = min(self.charge_time * self.charge_rate, self.max_velocity)
+                    self.velocity = self.charge_direction.normalize() * speed
+                    self.charge_ready = False
+                self.charging = False
+                self.charge_direction = vector(0, 0)
+                self.charge_time = 0
 
     def update(self, dt):
-        keys = pygame.key.get_pressed()
-        if keys[KEY_ABILITY] and self.slowmo_direction.length_squared() > 0:
-            move = self.slowmo_direction.normalize() * 1500 * dt
+        # Charging phase (for next move)
+        if self.charging:
+            self.charge_time += dt
+
+        # Sliding phase
+        if self.velocity.length_squared() > 0:
+            move = self.velocity * dt
+
             # Move axis by axis for precise collision
             # Horizontal
             self.rect.x += move.x
@@ -85,6 +104,8 @@ class Player(pygame.sprite.Sprite):
                         self.rect.right = sprite.rect.left
                     elif move.x < 0:
                         self.rect.left = sprite.rect.right
+                    self.velocity.x = 0  # Stop horizontal movement on collision
+
             # Vertical
             self.rect.y += move.y
             for sprite in self.collision_sprites:
@@ -93,11 +114,52 @@ class Player(pygame.sprite.Sprite):
                         self.rect.bottom = sprite.rect.top
                     elif move.y < 0:
                         self.rect.top = sprite.rect.bottom
+                    self.velocity.y = 0  # Stop vertical movement on collision
+
+            # Apply friction
+            if self.velocity.length() > 0:
+                friction_vec = self.velocity.normalize() * self.friction * dt
+                if friction_vec.length() > self.velocity.length():
+                    self.velocity = vector(0, 0)
+                else:
+                    self.velocity -= friction_vec
+
             # Clamp to window bounds
             self.rect.left = max(self.rect.left, 0)
             self.rect.right = min(self.rect.right, 960)
             self.rect.top = max(self.rect.top, 0)
             self.rect.bottom = min(self.rect.bottom, 960)
+
+            # Stop if velocity is very low
+            if self.velocity.length() < 10:
+                self.velocity = vector(0, 0)
+
+        # If movement stopped and a charge is ready, launch immediately
+        if self.velocity.length_squared() == 0 and self.charge_ready:
+            if self.charge_direction.length_squared() > 0:
+                speed = min(self.charge_time * self.charge_rate, self.max_velocity)
+                self.velocity = self.charge_direction.normalize() * speed
+            self.charge_ready = False
+            self.charge_time = 0
+            self.charge_direction = vector(0, 0)
+
+    def draw_velocity_bar(self, surface):
+        # Bar settings
+        bar_width = 40
+        bar_height = 8
+        bar_x = self.rect.centerx - bar_width // 2
+        bar_y = self.rect.top - 16
+
+        # Show charge velocity if charging, else show 0
+        velocity_mag = self.charge_time * self.charge_rate if self.charging else 0
+        velocity_ratio = min(velocity_mag / self.max_velocity, 1.0)
+
+        # Draw background
+        pygame.draw.rect(surface, (60, 60, 60), (bar_x, bar_y, bar_width, bar_height))
+        # Draw velocity
+        pygame.draw.rect(surface, (0, 200, 0), (bar_x, bar_y, int(bar_width * velocity_ratio), bar_height))
+        # Draw border
+        pygame.draw.rect(surface, (255, 255, 255), (bar_x, bar_y, bar_width, bar_height), 2)
 
 ###################################################################################################
 
@@ -167,12 +229,13 @@ class Game:
             dt = self.clock.tick(60) / 1000  # Cap at 60 FPS
 
             self.all_sprites.update(dt)
-            self.display_surface.fill((30, 30, 30))
+            self.display_surface.fill((222, 222, 222))
 
             # Draw the map
             self.draw_map()
 
             self.all_sprites.draw(self.display_surface)
+            self.player.draw_velocity_bar(self.display_surface)
             pygame.display.update()
 
 if __name__ == '__main__':
