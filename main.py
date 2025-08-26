@@ -100,21 +100,35 @@ class Player(pygame.sprite.Sprite):
             self.rect.x += move.x
             for sprite in self.collision_sprites:
                 if self.rect.colliderect(sprite.rect):
-                    if move.x > 0:
-                        self.rect.right = sprite.rect.left
-                    elif move.x < 0:
-                        self.rect.left = sprite.rect.right
-                    self.velocity.x = 0  # Stop horizontal movement on collision
+                    offset = (self.rect.left - sprite.rect.left, self.rect.top - sprite.rect.top)
+                    if getattr(sprite, 'diagonal', False):
+                        # Pixel-perfect check
+                        if sprite.mask.overlap(pygame.mask.from_surface(self.image), offset):
+                            # Reflect velocity for diagonal (45-degree, bottom-left to top-right)
+                            self.velocity = vector(self.velocity.y, self.velocity.x)
+                            return
+                    else:
+                        if move.x > 0:
+                            self.rect.right = sprite.rect.left
+                        elif move.x < 0:
+                            self.rect.left = sprite.rect.right
+                        self.velocity.x = 0  # Stop horizontal movement on collision
 
             # Vertical
             self.rect.y += move.y
             for sprite in self.collision_sprites:
                 if self.rect.colliderect(sprite.rect):
-                    if move.y > 0:
-                        self.rect.bottom = sprite.rect.top
-                    elif move.y < 0:
-                        self.rect.top = sprite.rect.bottom
-                    self.velocity.y = 0  # Stop vertical movement on collision
+                    offset = (self.rect.left - sprite.rect.left, self.rect.top - sprite.rect.top)
+                    if getattr(sprite, 'diagonal', False):
+                        if sprite.mask.overlap(pygame.mask.from_surface(self.image), offset):
+                            self.velocity = vector(self.velocity.y, self.velocity.x)
+                            return
+                    else:
+                        if move.y > 0:
+                            self.rect.bottom = sprite.rect.top
+                        elif move.y < 0:
+                            self.rect.top = sprite.rect.bottom
+                        self.velocity.y = 0  # Stop vertical movement on collision
 
             # Apply friction
             if self.velocity.length() > 0:
@@ -164,10 +178,12 @@ class Player(pygame.sprite.Sprite):
 ###################################################################################################
 
 class Tile(pygame.sprite.Sprite):
-    def __init__(self, pos, surf, *groups):
+    def __init__(self, pos, surf, *groups, diagonal=False):
         super().__init__(*groups)
-        self.image = surf
+        self.image = surf.convert_alpha()
         self.rect = self.image.get_rect(topleft=pos)
+        self.mask = pygame.mask.from_surface(self.image)
+        self.diagonal = diagonal
 
 ###################################################################################################
 
@@ -195,15 +211,18 @@ class Game:
                 player_pos = (obj.x, obj.y)
                 break
 
-        # Add collidable tiles from a layer named "collision"
+        # Add all tiles as collidable, mark diagonal by GID
         for layer in self.tmx_data.visible_layers:
-            if hasattr(layer, 'tiles') and layer.name == "collision":
+            if hasattr(layer, 'tiles'):
                 for x, y, surf in layer.tiles():
+                    gid = layer.data[y][x]
+                    is_diagonal = gid in (32, 33)
                     Tile(
                         (x * self.tmx_data.tilewidth, y * self.tmx_data.tileheight),
                         surf,
                         self.all_sprites,
-                        self.collision_sprites
+                        self.collision_sprites,
+                        diagonal=is_diagonal
                     )
 
         self.player = Player(player_pos, [self.all_sprites], self.collision_sprites)
