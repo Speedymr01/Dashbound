@@ -29,6 +29,9 @@ class Player(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center=pos)
         self.collision_sprites = collision_sprites
 
+        # For pixel-perfect collision
+        self.mask = pygame.mask.from_surface(self.image)
+
         # Movement state
         self.velocity = vector(0, 0)
         self.max_velocity = 1200  # px/s
@@ -100,35 +103,45 @@ class Player(pygame.sprite.Sprite):
             self.rect.x += move.x
             for sprite in self.collision_sprites:
                 if self.rect.colliderect(sprite.rect):
-                    offset = (self.rect.left - sprite.rect.left, self.rect.top - sprite.rect.top)
-                    if getattr(sprite, 'diagonal', False):
-                        # Pixel-perfect check
-                        if sprite.mask.overlap(pygame.mask.from_surface(self.image), offset):
-                            # Reflect velocity for diagonal (45-degree, bottom-left to top-right)
-                            self.velocity = vector(self.velocity.y, self.velocity.x)
-                            return
+                    if getattr(sprite, 'pixel_perfect', False) and sprite.mask:
+                        offset = (self.rect.left - sprite.rect.left, self.rect.top - sprite.rect.top)
+                        if sprite.mask.overlap(self.mask, offset):
+                            self.velocity.x = 0
+                            # Push out of the tile horizontally
+                            if move.x > 0:
+                                while sprite.mask.overlap(self.mask, (self.rect.left - sprite.rect.left, self.rect.top - sprite.rect.top)):
+                                    self.rect.x -= 1
+                            elif move.x < 0:
+                                while sprite.mask.overlap(self.mask, (self.rect.left - sprite.rect.left, self.rect.top - sprite.rect.top)):
+                                    self.rect.x += 1
                     else:
                         if move.x > 0:
                             self.rect.right = sprite.rect.left
                         elif move.x < 0:
                             self.rect.left = sprite.rect.right
-                        self.velocity.x = 0  # Stop horizontal movement on collision
+                        self.velocity.x = 0
 
             # Vertical
             self.rect.y += move.y
             for sprite in self.collision_sprites:
                 if self.rect.colliderect(sprite.rect):
-                    offset = (self.rect.left - sprite.rect.left, self.rect.top - sprite.rect.top)
-                    if getattr(sprite, 'diagonal', False):
-                        if sprite.mask.overlap(pygame.mask.from_surface(self.image), offset):
-                            self.velocity = vector(self.velocity.y, self.velocity.x)
-                            return
+                    if getattr(sprite, 'pixel_perfect', False) and sprite.mask:
+                        offset = (self.rect.left - sprite.rect.left, self.rect.top - sprite.rect.top)
+                        if sprite.mask.overlap(self.mask, offset):
+                            self.velocity.y = 0
+                            # Push out of the tile vertically
+                            if move.y > 0:
+                                while sprite.mask.overlap(self.mask, (self.rect.left - sprite.rect.left, self.rect.top - sprite.rect.top)):
+                                    self.rect.y -= 1
+                            elif move.y < 0:
+                                while sprite.mask.overlap(self.mask, (self.rect.left - sprite.rect.left, self.rect.top - sprite.rect.top)):
+                                    self.rect.y += 1
                     else:
                         if move.y > 0:
                             self.rect.bottom = sprite.rect.top
                         elif move.y < 0:
                             self.rect.top = sprite.rect.bottom
-                        self.velocity.y = 0  # Stop vertical movement on collision
+                        self.velocity.y = 0
 
             # Apply friction
             if self.velocity.length() > 0:
@@ -178,12 +191,15 @@ class Player(pygame.sprite.Sprite):
 ###################################################################################################
 
 class Tile(pygame.sprite.Sprite):
-    def __init__(self, pos, surf, *groups, diagonal=False):
+    def __init__(self, pos, surf, *groups, pixel_perfect=False):
         super().__init__(*groups)
         self.image = surf.convert_alpha()
         self.rect = self.image.get_rect(topleft=pos)
-        self.mask = pygame.mask.from_surface(self.image)
-        self.diagonal = diagonal
+        self.pixel_perfect = pixel_perfect
+        if pixel_perfect:
+            self.mask = pygame.mask.from_surface(self.image)
+        else:
+            self.mask = None
 
 ###################################################################################################
 
@@ -205,24 +221,21 @@ class Game:
     def setup(self):
         # Default position in case marker is not found
         player_pos = (100, 100)
-        # Search for the 'Player' marker in object layers
         for obj in self.tmx_data.objects:
             if obj.name == "Player":
                 player_pos = (obj.x, obj.y)
                 break
 
-        # Add all tiles as collidable, mark diagonal by GID
         for layer in self.tmx_data.visible_layers:
             if hasattr(layer, 'tiles'):
+                pixel_perfect = (layer.name == "collision-diagonal")
                 for x, y, surf in layer.tiles():
-                    gid = layer.data[y][x]
-                    is_diagonal = gid in (32, 33)
                     Tile(
                         (x * self.tmx_data.tilewidth, y * self.tmx_data.tileheight),
                         surf,
                         self.all_sprites,
                         self.collision_sprites,
-                        diagonal=is_diagonal
+                        pixel_perfect=pixel_perfect
                     )
 
         self.player = Player(player_pos, [self.all_sprites], self.collision_sprites)
