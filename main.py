@@ -245,6 +245,24 @@ class Game:
             if hasattr(layer, 'tiles'):
                 for x, y, surf in layer.tiles():
                     self.display_surface.blit(surf, (x * self.tmx_data.tilewidth, y * self.tmx_data.tileheight))
+        # Draw objects from object layers (like "Objects")
+        for layer in self.tmx_data.layers:
+            if layer.__class__.__name__ == "TiledObjectGroup" and layer.name == "Objects":
+                for obj in layer:
+                    print(vars(obj))  # See what attributes are available
+                    if hasattr(obj, 'gid') and obj.gid:
+                        surf = self.tmx_data.get_tile_image_by_gid(obj.gid)
+                        if surf:
+                            self.display_surface.blit(surf, (obj.x, obj.y))
+                    elif hasattr(obj, 'image') and obj.image:
+                        self.display_surface.blit(obj.image, (obj.x, obj.y))
+                    elif hasattr(obj, 'image') and obj.image is None and hasattr(obj, 'source') and obj.source:
+                        # Try to load manually
+                        import os
+                        image_path = os.path.join(os.path.dirname(self.tmx_data.filename), obj.source)
+                        if os.path.exists(image_path):
+                            surf = pygame.image.load(image_path).convert_alpha()
+                            self.display_surface.blit(surf, (obj.x, obj.y))
 
     def run(self):
         while True:
