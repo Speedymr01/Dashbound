@@ -216,9 +216,10 @@ class Game:
         # Groups
         self.all_sprites = pygame.sprite.Group()
         self.collision_sprites = pygame.sprite.Group()
-        self.setup()
+        self.initialize_map()
 
-    def setup(self):
+    def initialize_map(self):
+        import os
         # Default position in case marker is not found
         player_pos = (100, 100)
         for obj in self.tmx_data.objects:
@@ -230,6 +231,7 @@ class Game:
             if hasattr(layer, 'tiles'):
                 pixel_perfect = (layer.name == "collision-diagonal")
                 for x, y, surf in layer.tiles():
+                    # Setup tile
                     Tile(
                         (x * self.tmx_data.tilewidth, y * self.tmx_data.tileheight),
                         surf,
@@ -237,14 +239,9 @@ class Game:
                         self.collision_sprites,
                         pixel_perfect=pixel_perfect
                     )
-
-        self.player = Player(player_pos, [self.all_sprites], self.collision_sprites)
-
-    def draw_map(self):
-        for layer in self.tmx_data.visible_layers:
-            if hasattr(layer, 'tiles'):
-                for x, y, surf in layer.tiles():
+                    # Draw tile
                     self.display_surface.blit(surf, (x * self.tmx_data.tilewidth, y * self.tmx_data.tileheight))
+
         # Draw objects from object layers (like "Objects")
         for layer in self.tmx_data.layers:
             if layer.__class__.__name__ == "TiledObjectGroup" and layer.name == "Objects":
@@ -257,12 +254,14 @@ class Game:
                     elif hasattr(obj, 'image') and obj.image:
                         self.display_surface.blit(obj.image, (obj.x, obj.y))
                     elif hasattr(obj, 'image') and obj.image is None and hasattr(obj, 'source') and obj.source:
-                        # Try to load manually
-                        import os
                         image_path = os.path.join(os.path.dirname(self.tmx_data.filename), obj.source)
                         if os.path.exists(image_path):
                             surf = pygame.image.load(image_path).convert_alpha()
                             self.display_surface.blit(surf, (obj.x, obj.y))
+
+        # Create player
+        self.player = Player(player_pos, [self.all_sprites], self.collision_sprites)
+
 
     def run(self):
         while True:
@@ -281,8 +280,6 @@ class Game:
             self.all_sprites.update(dt)
             self.display_surface.fill((222, 222, 222))
 
-            # Draw the map
-            self.draw_map()
 
             self.all_sprites.draw(self.display_surface)
             self.player.draw_velocity_bar(self.display_surface)
